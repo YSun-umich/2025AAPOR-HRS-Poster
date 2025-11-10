@@ -1,0 +1,319 @@
+---
+title: "ADRA ACS report(Age/Race/Language) - Washtenaw County Data"
+author: "Yao Sun and Félix Báez-Santiago"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,cache=TRUE, 
+                      autodep=TRUE, cache.comments=FALSE,
+                      message=FALSE, warning=FALSE,
+                      fig.width=4.5, fig.height=3)
+```
+
+```{r, include=FALSE}
+library(tidycensus)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+```
+
+###  This report focuses on the proportion of the population(ages 40 and older), proportion of non-Hispanic Whites, and proportion of population that is not proficient in English in Washtenaw County.  
+
+```{r, include=FALSE}
+census_api_key("dbfc030f58523c027b6e82fb140a5f7034e4fa69", install = TRUE, overwrite=TRUE)
+
+Sys.getenv("CENSUS_API_KEY")
+
+variables <- load_variables(2022, "acs5") 
+
+washtenaw_population <- get_acs(geography = "tract", variables = c( 
+  "B01001_001", # Total population
+  "B01001_002", "B01001_026", # total pop of Male and Female
+  "B01001_014", "B01001_038", # 40 to 44, Male | Female
+  "B01001_015", "B01001_039", # 45 to 49, Male | Female
+  "B01001_016", "B01001_040", # 50 to 54, Male | Female
+  "B01001_017", "B01001_041", # 55 to 59, Male | Female
+  "B01001_018", "B01001_042", # 60 to 61, Male | Female
+  "B01001_019", "B01001_043", # 62 to 64, Male | Female
+  "B01001_020", "B01001_044", # 65 to 66, Male | Female
+  "B01001_021", "B01001_045", # 67 to 69, Male | Female
+  "B01001_022", "B01001_046", # 70 to 74, Male | Female
+  "B01001_023", "B01001_047",  # 75 to 79, Male | Female
+  "B01001_024", "B01001_048",  # 80 to 84, Male | Female
+  "B01001_025", "B01001_049",  # 85 and older, Male | Female
+  
+  "B03002_003", # Non-Hispanic White
+  "B01001H_001", # total non-Hispanic White White
+  "B01001H_002", "B01001H_017", # total non-Hispanic White male and female
+  
+  "B01001H_011", "B01001H_012", # non-Hispanic White male 35 to 44, 45 to 54
+  "B01001H_013", "B01001H_014", # non-Hispanic white male 55 to 64, 65 to 74
+  "B01001H_015", "B01001H_016", # non-Hispanic white male 75 to 84, 85 and older
+  
+  "B01001H_026", "B01001H_027", # non-Hispanic White female 35 to 44, 45 to 54
+  "B01001H_028", "B01001H_029", # non-Hispanic White female 55 to 64, 65 to 74
+  "B01001H_030", "B01001H_031",  # non-Hispanic white female 75 to 84, 85 and older
+  
+  "B06007_001", # Place of birth: Total population of 5&older
+  "B06007_002", # Total population of who ONLY speak English
+  "B06007_003", # Total population of who ONLY speak Spanish
+  "B06007_005", # Total population of Spanish speakers who speak English LESS THAN VERY WEll
+  "B06007_006", # Total population of other language speakers
+  "B06007_008", # Total population of other language speakers who speak English LESS THAN VERY WEll
+  "B06007_009", # Born in state of residence
+  "B06007_017", # Born in other state
+  "B06007_025", # Native, Born outside the US
+  "B06007_033" # Foreign born
+),
+  state = "MI",
+  county = "Washtenaw",
+  year = 2022,
+  survey = "acs5",
+  output = "wide",
+  geometry = FALSE
+)
+```
+
+```{r}
+sum(washtenaw_population$B01001_001E) # total pop of Washtenaw 370,231
+```
+
+### 1. Find out those whose ages are 40(&older) in proportion to population. 
+
+```{r}
+# create data set for population of 40&older
+population_forty_older <- washtenaw_population %>% 
+  select(GEOID, NAME, B01001_001E, B01001_014E, B01001_015E, B01001_016E, B01001_017E, B01001_018E, B01001_019E, B01001_020E, B01001_021E, B01001_022E, B01001_023E, B01001_024E, B01001_025E, B01001_038E, B01001_039E, B01001_040E, B01001_041E, B01001_042E, B01001_043E, B01001_044E, B01001_045E, B01001_046E, B01001_047E, B01001_048E, B01001_049E) %>% 
+  group_by(NAME) %>%
+  summarize(forty_older = sum(B01001_014E, B01001_015E, B01001_016E, B01001_017E, B01001_018E, B01001_019E, B01001_020E, B01001_021E, B01001_022E, B01001_023E, B01001_024E, B01001_025E, B01001_038E, B01001_039E, B01001_040E, B01001_041E, B01001_042E, B01001_043E, B01001_044E, B01001_045E, B01001_046E, B01001_047E, B01001_048E, B01001_049E, na.rm = TRUE),
+            proportion = sum(B01001_014E, B01001_015E, B01001_016E, B01001_017E, B01001_018E, B01001_019E, B01001_020E, B01001_021E, B01001_022E, B01001_023E, B01001_024E, B01001_025E, B01001_038E, B01001_039E, B01001_040E, B01001_041E, B01001_042E, B01001_043E, B01001_044E, B01001_045E, B01001_046E, B01001_047E, B01001_048E, B01001_049E, na.rm = TRUE) / B01001_001E,
+            denominator_TotalPop = B01001_001E)
+
+population_forty_older$proportion_percent <- paste0(round(population_forty_older$proportion * 100, 2), "%")
+```
+
+```{r}
+sum(population_forty_older$forty_older) # total pop of 40&older 159,233
+```
+
+# ```{r}
+# summary(population_forty_older$proportion) # statistical summary of proportion of 40&older by each tract 
+# ```
+
+```{r, include=FALSE}
+write.csv(population_forty_older, "Proportion of Ages 40 and Older.csv", row.names = FALSE)
+```
+
+-  The total population for Census Tract 9802 and 9804 is zero, which has caused the two NAs in this data set.
+
+-  There was 159,233 of the population who was 40 and older, which accounted for 43.01% of total population. 
+
+-  There was 185,097 male and 185,134 female.
+
+### 2. Find out proportion of non-hispanic white(calculate in 1-X), and proportion of non-hispanic white of among 35 and 55. 
+
+```{r}
+# Create data set for non-Hispanic population 
+nonH_white_proportion <-  washtenaw_population %>% 
+  select(GEOID, NAME, B01001H_001E, B01001_001E) %>%
+  group_by(NAME) %>%
+  summarize(proportion = B01001H_001E/B01001_001E,
+         denominator_TotalPop = B01001_001E) %>% 
+  mutate(complement = (1 - proportion)) 
+
+nonH_white_proportion$proportion_percent <- paste0(round(nonH_white_proportion$proportion * 100, 2), "%")
+
+nonH_white_proportion$complement_percent <- paste0(round(nonH_white_proportion$complement * 100, 2), "%")
+```
+
+```{r}
+which(washtenaw_population$B01001H_001E == 0) # find out tracts where total non-Hispanic population is 0; row 102 and 104 refer to tract 9802 and 9804
+```
+
+```{r}
+sum(washtenaw_population$B01001H_001E) # total non-Hispanic white population
+```
+
+```{r}
+sum(washtenaw_population$B01001H_002E) # total non-Hispanic white Male population 
+```
+
+```{r}
+sum(washtenaw_population$B01001H_017E) # total non-Hispanic white Female population 
+```
+
+```{r}
+summary(nonH_white_proportion$proportion) # statistical summary of non-Hispanic population by each tract 
+```
+
+```{r, include=FALSE}
+write.csv(nonH_white_proportion, "Proportion of non-Hispanic White.csv", row.names = FALSE)
+```
+
+-  The data for Tract 9802 and 9804 is zero. 
+
+-  There was 254,046 of the population who was non-Hispanic white, which accounted for 0.6861824 of the total population. 
+
+```{r}
+# Create data set for 35&older non-Hispanic White population 
+nonH_white_35_older <- washtenaw_population %>% select(GEOID, NAME, B01001_001E, # Total population  
+B01001H_001E, # Non-Hispanic White
+
+B01001H_011E, B01001H_012E, #non-Hispanic White male 35 to 44, 45 to 54
+  B01001H_013E, B01001H_014E, #non-Hispanic white male 55 to 64, 65 to 74
+  B01001H_015E, B01001H_016E, #non-Hispanic white male 75 to 84, 85 and older
+  
+  B01001H_026E, B01001H_027E, # non-Hispanic White female 35 to 44, 45 to 54
+  B01001H_028E, B01001H_029E, # non-Hispanic White female 55 to 64, 65 to 74
+  B01001H_030E, B01001H_031E # non-Hispanic White female 75 to 84, 85 and older
+) %>% 
+  group_by(NAME) %>% 
+  summarize(denominator_nonHP = B01001H_001E,
+  proportion = sum(
+  B01001H_011E, B01001H_012E, #non-Hispanic White male 35 to 44, 45 to 54
+  B01001H_013E, B01001H_014E, #non-Hispanic white male 55 to 64, 65 to 74
+  B01001H_015E, B01001H_016E, #non-Hispanic white male 75 to 84, 85 and older
+  
+  B01001H_026E, B01001H_027E, # non-Hispanic White female 35 to 44, 45 to 54
+  B01001H_028E, B01001H_029E, # non-Hispanic White female 55 to 64, 65 to 74
+  B01001H_030E, B01001H_031E, # non-Hispanic White female 75 to 84, 85 and older
+  na.rm = TRUE) / B01001H_001E
+  )
+
+nonH_white_35_older$proportion_percent <- paste0(round(nonH_white_35_older$proportion * 100, 2), "%")
+```
+
+```{r}
+# Create data set for 55&older non-Hispanic White population 
+nonH_white_55_older <- washtenaw_population %>% 
+  select(GEOID, NAME, B01001_001E, # Total population  
+B01001H_001E, # Non-Hispanic White
+
+  B01001H_013E, B01001H_014E, #non-Hispanic white male 55 to 64, 65 to 74
+  B01001H_015E, B01001H_016E, #non-Hispanic white male 75 to 84, 85 and older
+  
+  B01001H_028E, B01001H_029E, # non-Hispanic White female 55 to 64, 65 to 74
+  B01001H_030E, B01001H_031E # non-Hispanic White female 75 to 84, 85 and older
+) %>% group_by(NAME) %>% 
+  summarize(denominator_nonHP = B01001H_001E,
+  proportion = sum(
+  B01001H_013E, B01001H_014E, #non-Hispanic white male 55 to 64, 65 to 74
+  B01001H_015E, B01001H_016E, #non-Hispanic white male 75 to 84, 85 and older
+  
+  B01001H_028E, B01001H_029E, # non-Hispanic White female 55 to 64, 65 to 74
+  B01001H_030E, B01001H_031E, # non-Hispanic White female 75 to 84, 85 and older
+  na.rm = TRUE) / B01001H_001E)
+
+nonH_white_55_older$proportion_percent <- paste0(round(nonH_white_55_older$proportion * 100, 2), "%")
+```
+
+```{r}
+summary(nonH_white_35_older$proportion) # statistical summary of population 35&older by tract (out of non-Hispanic White population) 
+```
+
+```{r}
+summary(nonH_white_55_older$proportion) # statistical summary of population 55&older by tract (out of non-Hispanic White population) 
+```
+
+```{r, include=FALSE}
+nonH_white_55_older <- nonH_white_55_older[, c(1, 3, 2, 4)]
+nonH_white_35_older <- nonH_white_35_older[, c(1, 3, 2, 4)]
+
+write.csv(nonH_white_35_older, "Proportion of non-Hispanic White of 35&older.csv", row.names = FALSE)
+
+write.csv(nonH_white_55_older, "Proportion of non-Hispanic White of 55&older.csv", row.names = FALSE)
+```
+
+### 3. Find out the proportion of population that speaks English LESS THAN very well, among Spanish Speakers and Other Language Speakers. 
+```{r, include=FALSE}
+# Create data set for 5&older population to find the proportion of English Improficiency
+
+EN_IMProficiency_population <- washtenaw_population %>% select(GEOID, NAME, B06007_001E, # Place of birth: Total population of 5&older
+  B06007_002E, # Total population of who ONLY speak English
+  B06007_003E, # Total population of who ALSO speak Spanish
+  B06007_005E, # Total population of Spanish speakers who speak English less than very well
+  B06007_006E, # Total population of who ALSO speak other languages
+  B06007_008E # Total population of other language speakers who speak English less than very well WEll
+) %>% group_by(NAME) %>%
+  summarize(denominator_TotalPop = B06007_001E,
+    proportion_ES_IM = B06007_005E / B06007_001E, 
+          # Total population of Spanish speakers who speak English less than very well
+    proportion_other_IM = B06007_008E / B06007_001E,
+          # Total population of other language speakers who speak English less than very well,
+    proportion_IM = proportion_ES_IM + proportion_other_IM # Total population of who speak English less than very well
+)
+
+EN_IMProficiency_population$proportion_ES_IM_percent <- paste0(round(EN_IMProficiency_population$proportion_ES_IM * 100, 2), "%")
+EN_IMProficiency_population$proportion_other_IM_percent <- paste0(round(EN_IMProficiency_population$proportion_other_IM * 100, 2), "%")
+EN_IMProficiency_population$proportion_IM_percent <- paste0(round(EN_IMProficiency_population$proportion_IM * 100, 2), "%")
+
+EN_IMProficiency_population <- EN_IMProficiency_population[, c(1, 3, 4, 5, 2, 6, 7, 8)]
+```
+
+```{r, include=FALSE}
+# sum(washtenaw_population$B06007_009E) + # Born in state of residence
+# sum(washtenaw_population$B06007_017E) + # Born in other state
+# sum(washtenaw_population$B06007_025E) + # Native; born outside the US
+# sum(washtenaw_population$B06007_033E) # Foreign born
+
+sum(washtenaw_population$B06007_001E) 
+
+sum(washtenaw_population$B06007_002E) # only speak EN
+
+sum(washtenaw_population$B06007_003E) # also speak ES
+
+sum(washtenaw_population$B06007_005E)
+
+sum(washtenaw_population$B06007_006E) # also speak other languages
+
+sum(washtenaw_population$B06007_008E)
+```
+
+```{r, include=FALSE}
+write.csv(EN_IMProficiency_population, "Proportion of who Speak English less than Very Well.csv", row.names = FALSE)
+```
+
+```{r}
+washtenaw_population$NAME[washtenaw_population$B06007_005E == 0] # find out which tracts have 0 Spanish speaker who speaks English less than very well; 45 in total
+
+washtenaw_population$NAME[washtenaw_population$B06007_008E == 0] # find out which tracts have 0 other language speaker who speaks English less than very well; 13 in total
+```
+ 
+-  Total population in Census Tract 9802 and 9804 is zero, which has caused the two NAs in this data set.
+
+Below is code for FIPS code by Felix 
+```{r}
+## ONLY KEEP ESTIMATE; DROP MOE
+data <- get_acs(
+  geography = "tract",
+  state = "13",
+  county = c("035", "057", "009"),
+  variables = "filtered_names$name",  # Total population
+  year = 2022,     
+  output = "wide"  
+)
+
+### testing
+
+library(purrr)
+
+# Use map to iterate over rows of split_psu_counties
+all_data <- pmap(
+  list(split_psu_counties$state, split_psu_counties$county), 
+  ~ get_acs(
+    geography = "tract",
+    state = ..1, 
+    county = ..2, 
+    variables = filtered_names$name,  # Total population
+    year = 2022,     
+    output = "wide"
+  )
+)
+
+# Combine all the results into one data frame
+final_data <- bind_rows(all_data)
+
+```

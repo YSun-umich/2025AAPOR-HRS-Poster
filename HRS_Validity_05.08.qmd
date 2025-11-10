@@ -1,0 +1,930 @@
+---
+title: "HRS_Validity"
+format: html
+editor: visual
+---
+
+```{r}
+#libraries
+library(foreign)
+library(haven)
+library(dplyr)
+library(tidyverse)
+library(janitor)
+library(purrr)
+library(readxl)
+library(writexl)
+library(ggplot2)
+library(reshape2)
+library(ggtext)
+library(readr)
+library(psych)
+library(MASS)
+library(broom)
+```
+
+# data preparation
+
+```{r}
+COG_IMP <- read_dta("COGIMP9220A_R.dta") 
+#add HHDPN for each respondent
+COG_IMP <- COG_IMP %>%
+  mutate(HHIDPN = paste0(HHID, PN)) %>%
+  relocate(HHIDPN, .before = 1)
+
+#merge with tracker file
+TRACKER <- read_dta("Tracker(trk2022tr)_r.dta")
+TRACKER <- TRACKER %>%
+  mutate(HHIDPN = paste0(HHID, PN)) %>%
+  relocate(HHIDPN, .before = 1)
+
+COG_IMP <- inner_join(TRACKER, COG_IMP, by = "HHIDPN")
+
+#Till this step, COG_IMP has all data that we need, but we need to find demographic variables because they are not recoded for racial group and language and related others 
+```
+
+```{r 2016 data prep}
+#from this step，use PWGTR for 2016; RWGTR is for 2020
+#remove 0 weight in 2016
+COG_IMP <- COG_IMP %>% filter(PWGTR != 0) 
+
+#create groups based on race and language 
+
+##### Joanne's coding for RGROUP
+#COG_IMP$RGROUP <- NA
+#COG_IMP$RGROUP[COG_IMP$RACE == 1] <- 'Non-Latino White'
+#COG_IMP$RGROUP[COG_IMP$RACE == 2] <- 'Non-Latino Black'
+#Not Need: COG_IMP$RGROUP[COG_IMP$RACE == 7] <- 'Other'
+#Not Need: COG_IMP$RGROUP[COG_IMP$RACE == 0] <- 'Not Obtained'
+
+# Further divide the Latino group based on the interview language
+#COG_IMP$RGROUP[COG_IMP$RIWLANG == 2 & is.na(COG_IMP$RGROUP)] <- 'Latino Spanish'
+#COG_IMP$RGROUP[COG_IMP$RIWLANG == 1 & is.na(COG_IMP$RGROUP)] <- 'Latino English'
+
+##### Gloria's coding for RGROUP, revised
+COG_IMP <- COG_IMP %>% mutate(
+  RGROUP = case_when(
+    RACE == 1 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic White",
+    RACE == 2 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic Black",
+    #RACE == 7 & HISPANIC %in% c(0, 5) ~ "Other",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 1 ~ "Hispanic (English)",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 2 ~ "Hispanic (Spanish)",
+    TRUE ~ NA_character_
+  )
+) 
+
+unique(COG_IMP$RGROUP)
+
+# recode education into factor variable
+COG_IMP$DEGREE <- as.factor(COG_IMP$DEGREE)
+```
+
+```{r, adding education level}
+COG_IMP <- COG_IMP %>% 
+ mutate(
+    EDU = case_when(
+      DEGREE %in% c(0, 1, 2) ~ "HS or less",   
+      DEGREE %in% c(3, 4, 5, 6, 9) ~ "Some college or more",       
+      TRUE ~ NA_character_                                      
+    ) %>% fct_relevel("HS or less", "Some college or more")
+    )
+table(COG_IMP$RGROUP)
+mean(COG_IMP$PAGE)
+# n of " HS or less": 12585  
+# n of "Some college or more": 6939
+```
+
+```{r}
+# recode predictor variable
+COG_IMP$RGROUP <- as.factor(COG_IMP$RGROUP)
+COG_IMP$RGROUP <- relevel(COG_IMP$RGROUP, ref = "Non-Hispanic White")
+
+COG_IMP$EDU <- as.factor(COG_IMP$EDU)
+
+COG_IMP$GENDER <- recode(COG_IMP$GENDER, `1` = "male", `2` = "female")
+COG_IMP$GENDER <- as.factor(COG_IMP$GENDER)
+table(COG_IMP$GENDER)
+```
+
+```{r}
+# recode the two variables whose options need to be flipped the other way
+COG_IMP$R13SLFMEM <- recode(COG_IMP$R13SLFMEM, 
+                             `1` = 5, 
+                             `2` = 4, 
+                             `3` = 3, 
+                             `4` = 2, 
+                             `5` = 1)
+
+COG_IMP$R13SLFMEM <- recode(COG_IMP$R13SLFMEM, 
+                             `1` = 3, 
+                             `2` = 2, 
+                             `3` = 1)
+
+```
+
+```{r}
+# centralize AGE 
+COG_IMP$centered_AGE <- COG_IMP$PAGE - mean(COG_IMP$PAGE, na.rm = TRUE)
+```
+
+# continuous: regression preparation
+
+Note: 2016-13th year; change initial letter to R
+
+```{r aim 1}
+# If the variable type is continuous numeric, use lm() if the scores are normally distributed, or glm(family = "poisson") if scores are counts and variance ≈ mean; when using lm(), check residuals; 
+
+lm(R13IMRC ~ RGROUP+EDU+centered_AGE+GENDER, data=COG_IMP)
+summary(formula2_IWRC)
+hist(resid(formula2_IWRC), 
+     breaks = 30, 
+     main = "Histogram of Residuals", 
+     xlab = "Residuals", 
+     col = "lightblue")
+qqnorm(resid(formula2_IWRC), main = "Q-Q Plot of Residuals")
+qqline(resid(formula2_IWRC), col = "red")
+
+formula2_DLRC <- lm(R13DLRC ~ RGROUP+EDU+centered_AGE+GENDER, data=COG_IMP)
+hist(resid(formula2_DLRC), 
+     breaks = 30, 
+     main = "Histogram of Residuals", 
+     xlab = "Residuals", 
+     col = "lightblue")
+qqnorm(resid(formula2_DLRC), main = "Q-Q Plot of Residuals")
+qqline(resid(formula2_DLRC), col = "red")
+
+
+formula2_VOCAB <- lm(R13VOCAB ~ RGROUP+EDU+centered_AGE+GENDER, data=COG_IMP)
+hist(resid(formula2_VOCAB), 
+     breaks = 30, 
+     main = "Histogram of Residuals", 
+     xlab = "Residuals", 
+     col = "lightblue")
+qqnorm(resid(formula2_VOCAB), main = "Q-Q Plot of Residuals")
+qqline(resid(formula2_VOCAB), col = "red")
+
+formula2_SER7 <- lm(R13SER7 ~ RGROUP+EDU+centered_AGE+GENDER, data=COG_IMP)
+hist(resid(formula2_SER7), 
+     breaks = 30, 
+     main = "Histogram of Residuals", 
+     xlab = "Residuals", 
+     col = "lightblue")
+qqnorm(resid(formula2_SER7), main = "Q-Q Plot of Residuals")
+qqline(resid(formula2_SER7), col = "red")
+
+formula2_SER7 <- lm(R13SER7 ~ RGROUP+EDU+centered_AGE+GENDER, data=COG_IMP)
+hist(resid(formula2_SER7), 
+     breaks = 30, 
+     main = "Histogram of Residuals", 
+     xlab = "Residuals", 
+     col = "lightblue")
+qqnorm(resid(formula2_SER7), main = "Q-Q Plot of Residuals")
+qqline(resid(formula2_SER7), col = "red")
+
+# log-transform
+library(moments)
+skewness(resid(formula2_SER7))
+plot(formula2_SER7, which = 1) 
+
+formula2_SER7_log <- lm(log(R13SER7 + 1) ~ RGROUP + EDU + centered_AGE + GENDER, data = COG_IMP)
+hist(resid(formula2_SER7_log), 
+     breaks = 30, 
+     main = "Histogram of Residuals", 
+     xlab = "Residuals", 
+     col = "lightblue")
+qqnorm(resid(formula2_SER7_log), main = "Q-Q Plot of Residuals")
+qqline(resid(formula2_SER7_log), col = "red")
+
+formula2_SLFMEM <- lm(R13SLFMEM ~ RGROUP+EDU+centered_AGE+GENDER, data=COG_IMP)
+hist(resid(formula2_SLFMEM), 
+     breaks = 30, 
+     main = "Histogram of Residuals", 
+     xlab = "Residuals", 
+     col = "lightblue")
+qqnorm(resid(formula2_SLFMEM), main = "Q-Q Plot of Residuals")
+qqline(resid(formula2_SLFMEM), col = "red")
+```
+
+```{r}
+### Collect all formulas and extract their COEs and PValues into one file
+continuous_tests <- c("R13IMRC", "R13DLRC", "R13VOCAB", 
+                      "R13SER7", "R13SLFMEM") 
+predictors <- c("RGROUP", "EDU", "centered_AGE", "GENDER")
+
+length(COG_IMP$R13SER7)
+sum(is.na(COG_IMP$R13SER7))
+
+# Initialize empty lists to store estimates and p-values
+estimates <- list()
+pvalues <- list()
+
+# Loop through each cognitive test
+for (cog_var in continuous_tests) {
+  # Create formula (e.g., "R13IMRC ~ RGROUP + EDU + PAGE_centered + GENDER")
+  formula <- as.formula(paste(cog_var, "~", paste(predictors, collapse = " + ")))
+  
+  # Fit model and extract results
+  model <- lm(formula, data = COG_IMP)
+  coef_df <- tidy(model)
+  
+  # Store estimates and p-values
+  estimates[[cog_var]] <- coef_df$estimate
+  pvalues[[cog_var]] <- coef_df$p.value
+  
+  # Name the rows by predictor (for merging later)
+  names(estimates[[cog_var]]) <- coef_df$term
+  names(pvalues[[cog_var]]) <- coef_df$term
+}
+
+# Combine estimates and p-values into one data frame
+# 1. Convert lists to data frames
+estimates_df <- as.data.frame(do.call(cbind, estimates))
+pvalues_df <- as.data.frame(do.call(cbind, pvalues))
+colnames(estimates_df) <- paste0(colnames(estimates_df), "_Estimate")
+colnames(pvalues_df) <- paste0(colnames(pvalues_df), "_PValue")
+
+identical(rownames(estimates_df), rownames(pvalues_df))  # Should return TRUE
+
+# Get test names (without suffixes)
+test_names <- gsub("_Estimate$", "", colnames(estimates_df))
+
+# Initialize merged_df with the Predictor column
+merged_df <- data.frame(Predictor = rownames(estimates_df))
+
+# Add estimate and p-value columns in paired order
+for (test in test_names) {
+  merged_df[[paste0(test, "_Estimate")]] <- estimates_df[[paste0(test, "_Estimate")]]
+  merged_df[[paste0(test, "_PValue")]] <- pvalues_df[[paste0(test, "_PValue")]]
+}
+
+length(COG_IMP$R13IMRC)
+sum(is.na(COG_IMP$R13IMRC))
+table(COG_IMP$R13IMRC)
+
+# Export to CSV
+write.csv(merged_df, "continuous_test_results.csv", row.names = FALSE)
+```
+
+# add standard error
+
+```{r}
+# Initialize lists to store results
+estimates <- list()
+std_errors <- list()  # New list for standard errors
+pvalues <- list()
+
+# Loop through each cognitive test
+for (cog_var in continuous_tests) {
+  # Create formula (e.g., "R13IMRC ~ RGROUP + EDU + PAGE_centered + GENDER")
+  formula <- as.formula(paste(cog_var, "~", paste(predictors, collapse = " + ")))
+  
+  # Fit model and extract results
+  model <- lm(formula, data = COG_IMP)
+  coef_df <- tidy(model)
+  
+  # Store estimates, SEs, and p-values
+  estimates[[cog_var]] <- coef_df$estimate
+  std_errors[[cog_var]] <- coef_df$std.error  # Extract standard errors
+  pvalues[[cog_var]] <- coef_df$p.value
+  
+  # Name the rows by predictor (for merging later)
+  names(estimates[[cog_var]]) <- coef_df$term
+  names(std_errors[[cog_var]]) <- coef_df$term
+  names(pvalues[[cog_var]]) <- coef_df$term
+}
+
+# Combine estimates, SEs, and p-values into one data frame
+estimates_df <- as.data.frame(do.call(cbind, estimates))
+std_errors_df <- as.data.frame(do.call(cbind, std_errors))  # New SE data frame
+pvalues_df <- as.data.frame(do.call(cbind, pvalues))
+
+# Rename columns with appropriate suffixes
+colnames(estimates_df) <- paste0(colnames(estimates_df), "_Estimate")
+colnames(std_errors_df) <- paste0(colnames(std_errors_df), "_SE")  # SE suffix
+colnames(pvalues_df) <- paste0(colnames(pvalues_df), "_PValue")
+
+# Check that row names match (should return TRUE)
+identical(rownames(estimates_df), rownames(std_errors_df), rownames(pvalues_df))
+
+# Get test names (without suffixes)
+test_names <- gsub("_Estimate$", "", colnames(estimates_df))
+
+# Initialize merged_df with the Predictor column
+merged_df <- data.frame(Predictor = rownames(estimates_df))
+
+# Add estimate, SE, and p-value columns in paired order
+for (test in test_names) {
+  merged_df[[paste0(test, "_Estimate")]] <- estimates_df[[paste0(test, "_Estimate")]]
+  merged_df[[paste0(test, "_SE")]] <- std_errors_df[[paste0(test, "_SE")]]  # Add SE column
+  merged_df[[paste0(test, "_PValue")]] <- pvalues_df[[paste0(test, "_PValue")]]
+}
+
+write.csv(merged_df, "continuous_test_results_with_SE.csv", row.names = FALSE)
+
+```
+
+# ordinal: regression preparation
+
+```{r}
+# If it is discrete numeric (small range, ordinal-like), use polr() (Ordered Logistic Regression) if the scores represent ordered categories;
+COG_IMP$R13PSTMEM_R <- factor(COG_IMP$R13PSTMEM, levels = c(1, 2, 3), ordered = TRUE)
+
+ordinal_model <- polr(R13PSTMEM_R ~ RGROUP + EDU + centered_AGE + GENDER, data = COG_IMP, Hess = TRUE)
+ordinal_model
+
+cov_matrix <- vcov(ordinal_model)  # Variance-covariance matrix
+std_errors <- sqrt(diag(cov_matrix))  # Standard errors
+
+se <- results <- data.frame(
+  Predictor = names(coef(ordinal_model)),
+  Estimate = coef(ordinal_model),
+  Std_Error = std_errors[names(coef(ordinal_model))],  # Matches coefficients
+  P_Value = round(2 * pnorm(abs(coef(ordinal_model) / std_errors[names(coef(ordinal_model))]), 
+                     lower.tail = FALSE), 4)  # Wald test p-values
+)
+
+# Print results
+print(results)
+
+# Get summary and calculate p-values
+summary_ordinal <- summary(ordinal_model)
+coef_table <- coef(summary_ordinal)
+
+p_values <- 2 * pt(abs(coef_table[, "t value"]), 
+                  df = nobs(model) - nrow(coef_table), 
+                  lower.tail = FALSE)
+
+# Create merged results
+results <- data.frame(
+  coef_table,  # Keep all original columns (Estimate, Std.Error, t.value)
+  Manual_Pvalue = p_values  # Add your calculated p-values as new column
+)
+results <- results %>% dplyr::select(Value, Manual_Pvalue)
+results <- results %>%
+  dplyr::rename(
+    R13PSTMEM_R_Estimate = Value,
+    R13PSTMEM_R_Pvalue = Manual_Pvalue
+  )
+
+# Write to CSV
+write.csv(results, "ordinal_test_results.csv", row.names = TRUE)
+```
+
+# binary: regression preparation
+
+```{r}
+# If it is binary, use glm(family = "binomial") (Logistic Regression);
+# Note: for backwards count, combine scores 0 and 1 to make it binary variable; 
+COG_IMP$R13BWC20_R <- ifelse(is.na(COG_IMP$R13BWC20), NA,
+                             ifelse(COG_IMP$R13BWC20 %in% c(0, 1), 1, 2))
+COG_IMP$R13BWC20_R <- factor(COG_IMP$R13BWC20, levels = c(1, 2), ordered = TRUE)
+COG_IMP$R13SCIS_R <- factor(COG_IMP$R13SCIS, levels = c(0, 1), ordered = TRUE)
+COG_IMP$R13CACT_R <- factor(COG_IMP$R13CACT, levels = c(0, 1), ordered = TRUE)
+COG_IMP$R13PRES_R <- factor(COG_IMP$R13PRES, levels = c(0, 1), ordered = TRUE)
+COG_IMP$R13VP_R <- factor(COG_IMP$R13VP, levels = c(0, 1), ordered = TRUE)
+COG_IMP$R13MO_R <- factor(COG_IMP$R13MO, levels = c(0, 1), ordered = TRUE)
+COG_IMP$R13DY_R <- factor(COG_IMP$R13DY, levels = c(0, 1), ordered = TRUE)
+COG_IMP$R13YR_R <- factor(COG_IMP$R13YR, levels = c(0, 1), ordered = TRUE)
+COG_IMP$R13DW_R <- factor(COG_IMP$R13DW, levels = c(0, 1), ordered = TRUE)
+
+binary_tests <- c("R13BWC20_R", "R13SCIS_R", "R13CACT_R", "R13PRES_R", 
+                  "R13VP_R", "R13MO_R", "R13DY_R", "R13YR_R",
+                  "R13DW_R")
+
+f<- glm(R13BWC20_R ~ RGROUP + EDU + centered_AGE + GENDER, family = binomial(link = "logit"), data = COG_IMP)
+f
+
+results_list <- list()
+for (test in binary_tests) {
+  formula <- as.formula(paste(test, "~", paste(predictors, collapse = " + ")))
+  model <- glm(formula, family = binomial(link = "logit"), data = COG_IMP)
+  coef_summary <- coef(summary(model))
+  results_list[[test]] <- data.frame(
+    Term = rownames(coef_summary),
+    Estimate = coef_summary[, "Estimate"],
+    PValue = coef_summary[, "Pr(>|z|)"],
+    Test = test,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Merge with paired columns
+final_merged <- bind_rows(results_list) %>%
+  # Create paired column names
+  pivot_wider(
+    id_cols = Term,
+    names_from = Test,
+    values_from = c(Estimate, PValue),
+    names_glue = "{Test}_{.value}"
+  ) %>%
+  # Reorder columns manually to pair Estimate/PValue
+  dplyr::select(
+    Term,
+    # Pair columns for each test
+    starts_with("R13BWC20_R"), 
+    starts_with("R13SCIS_R"),
+    starts_with("R13CACT_R"),
+    starts_with("R13PRES_R"),
+    starts_with("R13VP_R"),
+    starts_with("R13MO_R"),
+    starts_with("R13DY_R"),
+    starts_with("R13YR_R"),
+    starts_with("R13DW_R"))
+
+length(COG_IMP$R13IMRC)
+sum(is.na(COG_IMP$R13IMRC))
+table(COG_IMP$R13DW_R)
+
+write.csv(final_merged, "binary_test_results.csv", row.names = FALSE)
+```
+
+# Interaction continuous Formula
+
+```{r}
+# lm(Score ~ EDU * RGROUP + centered_AGE + GENDER, data=COG_IMP)
+
+m <- lm(R13DLRC ~ EDU * RGROUP + centered_AGE + GENDER, data=COG_IMP)
+summary(m)
+# Initialize empty lists to store estimates and p-values
+estimates <- list()
+pvalues <- list()
+
+# Loop through each cognitive test
+for (cog_var in continuous_tests) {
+  formula <- as.formula(paste(cog_var, "~ EDU * RGROUP + centered_AGE + GENDER"))
+  
+  # Fit model and extract results
+  model <- lm(formula, data = COG_IMP)
+  coef_df <- tidy(model)  # Requires broom package
+  
+  # Store estimates and p-values
+  estimates[[cog_var]] <- coef_df$estimate
+  pvalues[[cog_var]] <- coef_df$p.value
+  
+  # Name the rows by predictor (for merging later)
+  names(estimates[[cog_var]]) <- coef_df$term
+  names(pvalues[[cog_var]]) <- coef_df$term
+}
+
+# Combine estimates and p-values into one data frame
+# 1. Convert lists to data frames
+estimates_df <- as.data.frame(do.call(cbind, estimates))
+pvalues_df <- as.data.frame(do.call(cbind, pvalues))
+colnames(estimates_df) <- paste0(colnames(estimates_df), "_Estimate")
+colnames(pvalues_df) <- paste0(colnames(pvalues_df), "_PValue")
+
+identical(rownames(estimates_df), rownames(pvalues_df))  # Should return TRUE
+
+# Get test names (without suffixes)
+test_names <- gsub("_Estimate$", "", colnames(estimates_df))
+
+# Initialize merged_df with the Predictor column
+merged_df <- data.frame(Predictor = rownames(estimates_df))
+
+# Add estimate and p-value columns in paired order
+for (test in test_names) {
+  merged_df[[paste0(test, "_Estimate")]] <- estimates_df[[paste0(test, "_Estimate")]]
+  merged_df[[paste0(test, "_PValue")]] <- pvalues_df[[paste0(test, "_PValue")]]
+}
+
+# Export to CSV
+write.csv(merged_df, "continuous_interaction_results.csv", row.names = FALSE)
+
+```
+
+# Interaction ordinal Formula
+
+```{r}
+# polr(R13PSTMEM_R ~ EDU * RGROUP + centered_AGE + GENDER, data = COG_IMP, Hess = TRUE)
+in_ordinal_model <- polr(R13PSTMEM_R ~ EDU * RGROUP + centered_AGE + GENDER, data = COG_IMP, Hess = TRUE)
+summary(in_ordinal_model)
+
+# Get summary and calculate p-values
+in_summary_ordinal <- summary(in_ordinal_model)
+in_coef_table <- coef(in_summary_ordinal)
+
+p_values <- 2 * pt(abs(in_coef_table[, "t value"]), 
+                  df = nobs(model) - nrow(in_coef_table), 
+                  lower.tail = FALSE)
+
+# Create merged results
+results <- data.frame(
+  in_coef_table,  # Keep all original columns (Estimate, Std.Error, t.value)
+  Manual_Pvalue = p_values  # Add your calculated p-values as new column
+)
+results <- results %>% dplyr::select(Value, Manual_Pvalue)
+results <- results %>%
+  dplyr::rename(
+    R13PSTMEM_R_Estimate = Value,
+    R13PSTMEM_R_Pvalue = Manual_Pvalue
+  )
+
+# Write to CSV
+write.csv(results, "ordinal_interaction_results.csv", row.names = TRUE)
+
+```
+
+# Interaction binary Formula
+
+```{r}
+# glm(Score ~ EDU * RGROUP + centered_AGE + GENDER, data, family = binomial(link = "logit"))
+
+a <- glm(R13SCIS_R ~ EDU * RGROUP + centered_AGE + GENDER, COG_IMP, family = binomial(link = "logit"))
+summary(a)
+
+sc_model_summary <- summary(a)
+results <- data.frame(
+  Predictor = rownames(sc_model_summary$coefficients),
+  Estimate = sc_model_summary$coefficients[, "Estimate"],
+  Std_Error = sc_model_summary$coefficients[, "Std. Error"],
+  Z_Value = sc_model_summary$coefficients[, "z value"],
+  P_Value = sc_model_summary$coefficients[, "Pr(>|z|)"]
+)
+
+write.csv(results, "logistic_regression_results.csv", row.names = FALSE)
+
+# Initialize results list
+results_list <- list()
+in_predictors <- c("EDU*RGROUP", "centered_AGE", "GENDER")
+
+# Loop through binary tests
+for (test in binary_tests) {
+  formula <- as.formula(paste(test, "~", paste(in_predictors, collapse = " + ")))
+  model <- glm(formula, family = binomial(link = "logit"), data = COG_IMP)
+  coef_summary <- coef(summary(model))
+  
+  # Store results in a dataframe
+  results_list[[test]] <- data.frame(
+    Term = rownames(coef_summary),
+    Estimate = coef_summary[, "Estimate"],
+    PValue = coef_summary[, "Pr(>|z|)"],
+    Test = test,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Merge all results into a single dataframe
+final_merged <- bind_rows(results_list) %>%
+  # Convert to wide format (paired Estimate/PValue columns)
+  pivot_wider(
+    id_cols = Term,
+    names_from = Test,
+    values_from = c(Estimate, PValue),
+    names_glue = "{Test}_{.value}"
+  ) %>%
+  # Reorder columns manually (adjust to match your desired output)
+  dplyr::select(
+    Term,
+    starts_with("R13BWC20_R"), 
+    starts_with("R13SCIS_R"),
+    starts_with("R13CACT_R"),
+    starts_with("R13PRES_R"),
+    starts_with("R13VP_R"),
+    starts_with("R13MO_R"),
+    starts_with("R13DY_R"),
+    starts_with("R13YR_R"),
+    starts_with("R13DW_R")
+  )
+
+# Save to CSV
+write.csv(final_merged, "binary_interaction_results.csv", row.names = FALSE)
+
+```
+
+# subset-creating
+
+```{r, run the regression models for each subset}
+# 1) Copy the previous code and switch to the new databases
+# 2) Use Score~Age+Gender+Education for the two subsets(Latino-English, L-Spanish)
+
+COG_IMP_LaSpanish <- COG_IMP %>% 
+  filter(RGROUP == "Hispanic (Spanish)")
+
+COG_IMP_LaEnglish <- COG_IMP %>% 
+  filter(RGROUP == "Hispanic (English)")
+
+COG_IMP_NHW <- COG_IMP %>% 
+  filter(RGROUP == "Non-Hispanic White")
+
+COG_IMP_NHB <- COG_IMP %>% 
+  filter(RGROUP == "Non-Hispanic Black")
+
+```
+
+# subset-continuous
+
+```{r}
+continuous_tests <- c("R13IMRC", "R13DLRC", "R13VOCAB", 
+                      "R13SER7", "R13SLFMEM") 
+predictors <- c("EDU", "centered_AGE", "GENDER")
+
+# Latino_Spanish
+# Initialize empty lists to store estimates and p-values
+estimates <- list()
+pvalues <- list()
+
+# Loop through each cognitive test
+for (cog_var in continuous_tests) {
+  # Create formula (e.g., "R13IMRC ~ EDU + centered_AGE + GENDER")
+  formula <- as.formula(paste(cog_var, "~", paste(predictors, collapse = " + ")))
+  
+  # Fit model and extract results
+  model <- lm(formula, data = COG_IMP_NHW)
+  coef_df <- tidy(model)
+  
+  # Store estimates and p-values
+  estimates[[cog_var]] <- coef_df$estimate
+  pvalues[[cog_var]] <- coef_df$p.value
+  
+  # Name the rows by predictor (for merging later)
+  names(estimates[[cog_var]]) <- coef_df$term
+  names(pvalues[[cog_var]]) <- coef_df$term
+}
+
+# Combine estimates and p-values into one data frame
+# 1. Convert lists to data frames
+estimates_df <- as.data.frame(do.call(cbind, estimates))
+pvalues_df <- as.data.frame(do.call(cbind, pvalues))
+colnames(estimates_df) <- paste0(colnames(estimates_df), "_Estimate")
+colnames(pvalues_df) <- paste0(colnames(pvalues_df), "_PValue")
+
+identical(rownames(estimates_df), rownames(pvalues_df))  # Should return TRUE
+
+# Get test names (without suffixes)
+test_names <- gsub("_Estimate$", "", colnames(estimates_df))
+
+# Initialize merged_df with the Predictor column
+merged_df <- data.frame(Predictor = rownames(estimates_df))
+
+# Add estimate and p-value columns in paired order
+for (test in test_names) {
+  merged_df[[paste0(test, "_Estimate")]] <- estimates_df[[paste0(test, "_Estimate")]]
+  merged_df[[paste0(test, "_PValue")]] <- pvalues_df[[paste0(test, "_PValue")]]
+}
+
+# Export to CSV
+write.csv(merged_df, "NHW_continuous_test_results.csv", row.names = FALSE)
+```
+
+```{r}
+# Latino_Spanish
+# Initialize empty lists to store estimates and p-values
+estimates <- list()
+pvalues <- list()
+
+# Loop through each cognitive test
+for (cog_var in continuous_tests) {
+  # Create formula (e.g., "R13IMRC ~ EDU + centered_AGE + GENDER")
+  formula <- as.formula(paste(cog_var, "~", paste(predictors, collapse = " + ")))
+  
+  # Fit model and extract results
+  model <- lm(formula, data = COG_IMP_NHB)
+  coef_df <- tidy(model)
+  
+  # Store estimates and p-values
+  estimates[[cog_var]] <- coef_df$estimate
+  pvalues[[cog_var]] <- coef_df$p.value
+  
+  # Name the rows by predictor (for merging later)
+  names(estimates[[cog_var]]) <- coef_df$term
+  names(pvalues[[cog_var]]) <- coef_df$term
+}
+
+# Combine estimates and p-values into one data frame
+# 1. Convert lists to data frames
+estimates_df <- as.data.frame(do.call(cbind, estimates))
+pvalues_df <- as.data.frame(do.call(cbind, pvalues))
+colnames(estimates_df) <- paste0(colnames(estimates_df), "_Estimate")
+colnames(pvalues_df) <- paste0(colnames(pvalues_df), "_PValue")
+
+identical(rownames(estimates_df), rownames(pvalues_df))  # Should return TRUE
+
+# Get test names (without suffixes)
+test_names <- gsub("_Estimate$", "", colnames(estimates_df))
+
+# Initialize merged_df with the Predictor column
+merged_df <- data.frame(Predictor = rownames(estimates_df))
+
+# Add estimate and p-value columns in paired order
+for (test in test_names) {
+  merged_df[[paste0(test, "_Estimate")]] <- estimates_df[[paste0(test, "_Estimate")]]
+  merged_df[[paste0(test, "_PValue")]] <- pvalues_df[[paste0(test, "_PValue")]]
+}
+
+# Export to CSV
+write.csv(merged_df, "NHB_continuous_test_results.csv", row.names = FALSE)
+```
+
+# subset-ordinal
+
+```{r}
+COG_IMP_NHB$R13PSTMEM_R <- factor(COG_IMP_NHB$R13PSTMEM, levels = c(1, 2, 3), ordered = TRUE)
+
+ordinal_model <- polr(R13PSTMEM_R ~ EDU + centered_AGE + GENDER, data = COG_IMP_NHB, Hess = TRUE)
+ordinal_model
+
+# Get summary and calculate p-values
+summary_ordinal <- summary(ordinal_model)
+coef_table <- coef(summary_ordinal)
+
+p_values <- 2 * pt(abs(coef_table[, "t value"]), 
+                  df = nobs(model) - nrow(coef_table), 
+                  lower.tail = FALSE)
+
+# Create merged results
+results <- data.frame(
+  coef_table,  # Keep all original columns (Estimate, Std.Error, t.value)
+  Manual_Pvalue = p_values  # Add your calculated p-values as new column
+)
+results <- results %>% dplyr::select(Value, Manual_Pvalue)
+results <- results %>%
+  dplyr::rename(
+    R13PSTMEM_R_Estimate = Value,
+    R13PSTMEM_R_Pvalue = Manual_Pvalue
+  )
+
+# Write to CSV
+write.csv(results, "NHB_ordinal_test_results.csv", row.names = TRUE)
+```
+
+```{r}
+COG_IMP_NHW$R13PSTMEM_R <- factor(COG_IMP_NHW$R13PSTMEM, levels = c(1, 2, 3), ordered = TRUE)
+
+ordinal_model <- polr(R13PSTMEM_R ~ EDU + centered_AGE + GENDER, data = COG_IMP_NHW, Hess = TRUE)
+ordinal_model
+
+# Get summary and calculate p-values
+summary_ordinal <- summary(ordinal_model)
+coef_table <- coef(summary_ordinal)
+
+p_values <- 2 * pt(abs(coef_table[, "t value"]), 
+                  df = nobs(model) - nrow(coef_table), 
+                  lower.tail = FALSE)
+
+# Create merged results
+results <- data.frame(
+  coef_table,  # Keep all original columns (Estimate, Std.Error, t.value)
+  Manual_Pvalue = p_values  # Add your calculated p-values as new column
+)
+results <- results %>% dplyr::select(Value, Manual_Pvalue)
+results <- results %>%
+  dplyr::rename(
+    R13PSTMEM_R_Estimate = Value,
+    R13PSTMEM_R_Pvalue = Manual_Pvalue
+  )
+
+# Write to CSV
+write.csv(results, "NHW_ordinal_test_results.csv", row.names = TRUE)
+```
+
+# subset-binary
+
+```{r}
+COG_IMP_NHW$R13BWC20_R <- ifelse(is.na(COG_IMP_NHW$R13BWC20), NA,
+                             ifelse(COG_IMP_NHW$R13BWC20 %in% c(0, 1), 1, 2))
+
+length(COG_IMP_NHW$R13SER7)
+sum(is.na(COG_IMP_NHW$R13SER7))
+table(COG_IMP_NHW$R13SER7)
+
+length(COG_IMP_NHW$R13BWC20_R)
+sum(is.na(COG_IMP_NHW$R13BWC20_R))
+table(COG_IMP_NHW$R13BWC20_R)
+unique(COG_IMP_NHW$R13BWC20)
+
+COG_IMP_NHW$R13BWC20_R <- factor(COG_IMP_NHW$R13BWC20, levels = c(1, 2), ordered = TRUE)
+COG_IMP_NHW$R13SCIS_R <- factor(COG_IMP_NHW$R13SCIS, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHW$R13CACT_R <- factor(COG_IMP_NHW$R13CACT, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHW$R13PRES_R <- factor(COG_IMP_NHW$R13PRES, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHW$R13VP_R <- factor(COG_IMP_NHW$R13VP, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHW$R13MO_R <- factor(COG_IMP_NHW$R13MO, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHW$R13DY_R <- factor(COG_IMP_NHW$R13DY, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHW$R13YR_R <- factor(COG_IMP_NHW$R13YR, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHW$R13DW_R <- factor(COG_IMP_NHW$R13DW, levels = c(0, 1), ordered = TRUE)
+
+binary_tests <- c("R13BWC20_R", "R13SCIS_R", "R13CACT_R", "R13PRES_R",
+                  "R13VP_R", "R13MO_R", "R13DY_R", "R13YR_R",
+                  "R13DW_R")
+
+f<- glm(R13BWC20_R ~ EDU + centered_AGE + GENDER, family = binomial(link = "logit"), data = COG_IMP_NHW)
+f
+
+results_list <- list()
+for (test in binary_tests) {
+  formula <- as.formula(paste(test, "~", paste(predictors, collapse = " + ")))
+  model <- glm(formula, family = binomial(link = "logit"), data = COG_IMP_NHW)
+  coef_summary <- coef(summary(model))
+  results_list[[test]] <- data.frame(
+    Term = rownames(coef_summary),
+    Estimate = coef_summary[, "Estimate"],
+    PValue = coef_summary[, "Pr(>|z|)"],
+    Test = test,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Merge with paired columns
+final_merged <- bind_rows(results_list) %>%
+  # Create paired column names
+  pivot_wider(
+    id_cols = Term,
+    names_from = Test,
+    values_from = c(Estimate, PValue),
+    names_glue = "{Test}_{.value}"
+  ) %>%
+  # Reorder columns manually to pair Estimate/PValue
+  dplyr::select(
+    Term,
+    # Pair columns for each test
+    starts_with("R13BWC20_R"), 
+    starts_with("R13SCIS_R"),
+    starts_with("R13CACT_R"),
+    starts_with("R13PRES_R"),
+    starts_with("R13VP_R"),
+    starts_with("R13MO_R"),
+    starts_with("R13DY_R"),
+    starts_with("R13YR_R"),
+    starts_with("R13DW_R"))
+
+write.csv(final_merged, "NHW_binary_test_results.csv", row.names = FALSE)
+```
+
+```{r}
+COG_IMP_NHB$R13BWC20_R <- ifelse(is.na(COG_IMP_NHB$R13BWC20), NA,
+                             ifelse(COG_IMP_NHB$R13BWC20 %in% c(0, 1), 1, 2))
+
+COG_IMP_NHB$R13BWC20_R <- factor(COG_IMP_NHB$R13BWC20, levels = c(1, 2), ordered = TRUE)
+COG_IMP_NHB$R13SCIS_R <- factor(COG_IMP_NHB$R13SCIS, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHB$R13CACT_R <- factor(COG_IMP_NHB$R13CACT, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHB$R13PRES_R <- factor(COG_IMP_NHB$R13PRES, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHB$R13VP_R <- factor(COG_IMP_NHB$R13VP, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHB$R13MO_R <- factor(COG_IMP_NHB$R13MO, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHB$R13DY_R <- factor(COG_IMP_NHB$R13DY, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHB$R13YR_R <- factor(COG_IMP_NHB$R13YR, levels = c(0, 1), ordered = TRUE)
+COG_IMP_NHB$R13DW_R <- factor(COG_IMP_NHB$R13DW, levels = c(0, 1), ordered = TRUE)
+
+binary_tests <- c("R13BWC20_R", "R13SCIS_R", "R13CACT_R", "R13PRES_R",
+                  "R13VP_R", "R13MO_R", "R13DY_R", "R13YR_R",
+                  "R13DW_R")
+
+f<- glm(R13BWC20_R ~ EDU + centered_AGE + GENDER, family = binomial(link = "logit"), data = COG_IMP_NHB)
+f
+
+length(COG_IMP_NHB$R13BWC20_R)
+sum(is.na(COG_IMP_NHB$R13BWC20))
+table(COG_IMP_NHB$R13BWC20_R)
+unique(COG_IMP_NHB$R13BWC20)
+
+results_list <- list()
+for (test in binary_tests) {
+  formula <- as.formula(paste(test, "~", paste(predictors, collapse = " + ")))
+  model <- glm(formula, family = binomial(link = "logit"), data = COG_IMP_NHB)
+  coef_summary <- coef(summary(model))
+  results_list[[test]] <- data.frame(
+    Term = rownames(coef_summary),
+    Estimate = coef_summary[, "Estimate"],
+    PValue = coef_summary[, "Pr(>|z|)"],
+    Test = test,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Merge with paired columns
+final_merged <- bind_rows(results_list) %>%
+  # Create paired column names
+  pivot_wider(
+    id_cols = Term,
+    names_from = Test,
+    values_from = c(Estimate, PValue),
+    names_glue = "{Test}_{.value}"
+  ) %>%
+  # Reorder columns manually to pair Estimate/PValue
+  dplyr::select(
+    Term,
+    # Pair columns for each test
+    starts_with("R13BWC20_R"), 
+    starts_with("R13SCIS_R"),
+    starts_with("R13CACT_R"),
+    starts_with("R13PRES_R"),
+    starts_with("R13VP_R"),
+    starts_with("R13MO_R"),
+    starts_with("R13DY_R"),
+    starts_with("R13YR_R"),
+    starts_with("R13DW_R"),
+    starts_with("R13DW_R"))
+
+write.csv(final_merged, "NHB_binary_test_results.csv", row.names = FALSE)
+```
+
+```{r}
+setwd("C:/Users/sybox/OneDrive/Desktop/孙尧/GitHub")
+system("git init")
+system("git add .")
+system('git commit -m "Initial commit"')
+system("git branch -M main")
+system("git remote add origin https://github.com/YSun-umich/2025AAPOR-HRS-Poster.git")
+system("git push -u origin main")
+
+```
+
+

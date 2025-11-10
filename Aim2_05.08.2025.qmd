@@ -1,0 +1,582 @@
+---
+title: "Aim2_04.26.2025"
+format: html
+editor: visual
+---
+```{r}
+#libraries
+library(foreign)
+library(haven)
+library(dplyr)
+library(tidyverse)
+library(janitor)
+library(purrr)
+library(readxl)
+library(writexl)
+library(ggplot2)
+library(reshape2)
+library(ggtext)
+library(readr)
+library(psych)
+library(MASS)
+library(broom)
+library(janitor)
+```
+
+# General Data Preparation
+```{r}
+# Read in wholeset 
+COG_IMP <- read_dta("COGIMP9220A_R.dta") 
+
+#add HHDPN for each respondent
+COG_IMP <- COG_IMP %>%
+  mutate(HHIDPN = paste0(HHID, PN)) %>%
+  relocate(HHIDPN, .before = 1)
+
+#merge with tracker file
+TRACKER <- read_dta("Tracker(trk2022tr)_r.dta")
+TRACKER <- TRACKER %>%
+  mutate(HHIDPN = paste0(HHID, PN)) %>%
+  relocate(HHIDPN, .before = 1)
+
+COG_IMP <- inner_join(TRACKER, COG_IMP, by = "HHIDPN")
+```
+
+# Create each dataset for each wave 
+```{r}
+table(COG_IMP$RACE)
+table(COG_IMP$HISPANIC)
+COG_IMP <- COG_IMP %>% filter(RACE != 0, HISPANIC != 0)
+
+# Read in each year's data 
+COG_IMP_20 <- COG_IMP %>% filter(RWGTR != 0) # 2020 = RWGTR
+COG_IMP_18 <- COG_IMP %>% filter(QWGTR != 0) # 2018 = QWGTR
+COG_IMP_16 <- COG_IMP %>% filter(PWGTR != 0) # 2016 = PWGTR
+COG_IMP_14 <- COG_IMP %>% filter(OWGTR != 0) # 2014 = OWGTR
+COG_IMP_12 <- COG_IMP %>% filter(NWGTR != 0) # 2012 = NWGTR
+COG_IMP_10 <- COG_IMP %>% filter(MWGTR != 0) # 2010 = MWGTR
+
+COG_IMP_20 <- COG_IMP_20 %>% mutate(
+  RGROUP = case_when(
+    RACE == 1 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic White",
+    RACE == 2 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic Black",
+    RACE == 7 & HISPANIC %in% c(0, 5) ~ "Other",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 1 ~ "Hispanic (English)",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 2 ~ "Hispanic (Spanish)",
+    TRUE ~ NA_character_
+  )
+) 
+
+COG_IMP_18 <- COG_IMP_18 %>% mutate(
+  RGROUP = case_when(
+    RACE == 1 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic White",
+    RACE == 2 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic Black",
+    RACE == 7 & HISPANIC %in% c(0, 5) ~ "Other",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 1 ~ "Hispanic (English)",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 2 ~ "Hispanic (Spanish)",
+    TRUE ~ NA_character_
+  )
+) 
+
+COG_IMP_16 <- COG_IMP_16 %>% mutate(
+  RGROUP = case_when(
+    RACE == 1 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic White",
+    RACE == 2 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic Black",
+    RACE == 7 & HISPANIC %in% c(0, 5) ~ "Other",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 1 ~ "Hispanic (English)",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 2 ~ "Hispanic (Spanish)",
+    TRUE ~ NA_character_
+  )
+) 
+
+COG_IMP_14 <- COG_IMP_14 %>% mutate(
+  RGROUP = case_when(
+    RACE == 1 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic White",
+    RACE == 2 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic Black",
+    RACE == 7 & HISPANIC %in% c(0, 5) ~ "Other",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 1 ~ "Hispanic (English)",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 2 ~ "Hispanic (Spanish)",
+    TRUE ~ NA_character_
+  )
+) 
+
+COG_IMP_12 <- COG_IMP_12 %>% mutate(
+  RGROUP = case_when(
+    RACE == 1 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic White",
+    RACE == 2 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic Black",
+    RACE == 7 & HISPANIC %in% c(0, 5) ~ "Other",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 1 ~ "Hispanic (English)",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 2 ~ "Hispanic (Spanish)",
+    TRUE ~ NA_character_
+  )
+) 
+
+COG_IMP_10 <- COG_IMP_10 %>% mutate(
+  RGROUP = case_when(
+    RACE == 1 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic White",
+    RACE == 2 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic Black",
+    RACE == 7 & HISPANIC %in% c(0, 5) ~ "Other",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 1 ~ "Hispanic (English)",
+    HISPANIC %in% c(1, 2, 3) & RIWLANG == 2 ~ "Hispanic (Spanish)",
+    TRUE ~ NA_character_
+  )
+) 
+table(COG_IMP_10$RGROUP)
+```
+
+# Subsetting All Six Waves 2010|12|14|16|18|20
+```{r}
+# exclude VOCAB 
+COG_IMP_10to20 <- COG_IMP %>%
+  filter(
+    !is.na(PWGTR), PWGTR != 0,
+    !is.na(OWGTR), OWGTR != 0,
+    !is.na(NWGTR), NWGTR != 0,
+    !is.na(MWGTR), MWGTR != 0,
+    !is.na(QWGTR), QWGTR != 0,
+    !is.na(RWGTR), RWGTR != 0,
+    !(R13STATUS %in% c(2, 3)),
+    !(R12STATUS %in% c(2, 3)), 
+    !(R11STATUS %in% c(2, 3)),
+    !(R10STATUS %in% c(2, 3)),
+    !(R14STATUS %in% c(2, 3)),
+    !(R15STATUS %in% c(2, 3))
+  )
+# alternative: subset(COG_IMP, PWGTR != 0 & OWGTR != 0 & NWGTR != 0 & MWGTR != 0) 
+
+# Assign gender
+COG_IMP_10to20$GENDER <- recode(COG_IMP_10to20$GENDER, `1` = "male", `2` = "female")
+COG_IMP_10to20$GENDER <- as.factor(COG_IMP_10to20$GENDER)
+
+# Assign EDU level
+COG_IMP_10to20 <- COG_IMP_10to20 %>% 
+  mutate(
+    EDU = case_when(
+      DEGREE %in% c(0, 1, 2) ~ "HS or less",   
+      DEGREE %in% c(3, 4, 5, 6, 9) ~ "Some college or more",       
+      TRUE ~ NA_character_                                      
+    ) %>% fct_relevel("HS or less", "Some college or more")
+    )
+
+# Assign baseline age
+COG_IMP_10to20$centered_10_AGE <- COG_IMP_10to20$MAGE - mean(COG_IMP_10to20$MAGE, na.rm = TRUE)
+mean(COG_IMP_10to20$MAGE, na.rm = TRUE)
+```
+
+# Count language occurrences 
+```{r}
+# Language Cleaning: 
+# Interview language
+# RIWLANG=2020 interview language
+# QIWLANG=2018
+# PIWLANG=2016
+# OIWLANG=2014
+# NIWLANG=2012
+# MIWLANG=2010
+
+language <- COG_IMP_10to20 %>%
+ # select language codes 
+  dplyr::select(HHIDPN, RIWLANG, QIWLANG, PIWLANG, OIWLANG, NIWLANG, MIWLANG)  %>% pivot_longer(
+    cols = -HHIDPN,
+    names_to = "Year",
+    values_to = "Language"
+  ) %>%
+  mutate(
+    Language = ifelse(is.na(Language), "No Response", as.character(Language)), # rid missing values
+    
+    # Convert Year to numeric value for sorting (e.g., R=2010, Q=2012, etc.)
+    Year_Num = case_when(
+      Year == "RIWLANG" ~ 2010,
+      Year == "QIWLANG" ~ 2012,
+      Year == "PIWLANG" ~ 2014,
+      Year == "OIWLANG" ~ 2016,
+      Year == "NIWLANG" ~ 2018,
+      Year == "MIWLANG" ~ 2020,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  filter(Language != "No Response") %>%
+  group_by(HHIDPN, Language) %>% # count each language by respondent
+  summarise(
+    Count = n(),
+    Most_Recent_Year = max(Year_Num, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(HHIDPN) %>%
+  arrange(desc(Count), desc(Most_Recent_Year)) %>% # determine the most frequent language selection
+  mutate(
+    Rank = row_number(),
+    MaxCount = max(Count)
+  ) %>%
+  filter(Count == MaxCount) %>%
+  summarise(
+    Most_Frequent_Lang = if (n() > 1) "Tie" else Language[1],
+    Years_Count = sum(Count),
+    .groups = "drop"
+  )
+
+table(language$Most_Frequent_Lang)
+
+ties <- language %>%
+  filter(Most_Frequent_Lang == "Tie") %>%
+  pull(HHIDPN)  # Extract as a vector
+
+# Extract demographics from the original data set
+demographics <- COG_IMP_10to20 %>%
+  filter(HHIDPN %in% ties) %>%
+  dplyr::select(
+    HHIDPN,
+    Gender = GENDER,      # Adjust column name if needed
+    Age = MAGE,          # Adjust column name if needed
+    Education = EDU       # Adjust column name if needed
+  ) %>%
+  distinct(HHIDPN, .keep_all = TRUE)  # Keep one record per person
+
+# View the results
+table(demographics$Gender)
+table(demographics$Age)
+table(demographics$Education)
+tabyl(demographics, Gender, Age, Education)
+```
+
+# Preparation before iSD
+```{r}
+# combine the most frequently selected language for each individual
+COG_IMP_10to20 <- COG_IMP_10to20 %>%
+  left_join(
+    language %>% dplyr::select(HHIDPN, Most_Frequent_Lang),  # Keep only needed columns
+    by = "HHIDPN"  # Match rows by HHIDPN
+  )
+
+head(COG_IMP_10to20)  # View first few rows
+table(COG_IMP_10to20$Most_Frequent_Lang, useNA = "always")  # Check for NAs (unmatched HHIDPNs)
+
+# Drop ties 
+COG_IMP_10to20 <- COG_IMP_10to20 %>%
+  filter(Most_Frequent_Lang != "Tie")
+
+# Assign race group using new language variable; Exclude whose RACE values = 0(not obtained) and 7(other)
+COG_IMP_10to20 <- COG_IMP_10to20 %>% filter(RACE != 0 & RACE != 7) %>% mutate(
+  RGROUP = case_when(
+    RACE == 1 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic White",
+    RACE == 2 & HISPANIC %in% c(0, 5) ~ "Non-Hispanic Black",
+    HISPANIC %in% c(1, 2, 3) & Most_Frequent_Lang == 1 ~ "Hispanic (English)",
+    HISPANIC %in% c(1, 2, 3) & Most_Frequent_Lang == 2 ~ "Hispanic (Spanish)",
+    TRUE ~ NA_character_
+  )
+) 
+
+table(COG_IMP_10to20$RGROUP)
+# Hispanic (English) 0.04081384
+# Hispanic (Spanish) 0.05299708
+# Non-Hispanic Black 0.2139376
+# Non-Hispanic White 0.6922515
+
+# COG_IMP_10to20 %>% filter(is.na(RGROUP)) %>% count(RACE, HISPANIC, Most_Frequent_Lang)
+
+tabyl(COG_IMP_10to20, HISPANIC, RACE, RGROUP)
+```
+
+# sum score of orientation 
+```{r}
+# Sum scores of Month, day of month, year, day of week, scissors, cactus, president, vice president of every wave.
+naming_tests <- c("R13MO","R13DY", "R13YR", "R13DW", "R13VP", "R13PRES", "R13CACT", "R13SCIS", 
+                  "R14MOP","R14DYP", "R14YRP", "R14DWP", "R14VPP", "R14PRESP", "R14CACTP", "R14SCISP",
+                  "R15MOP","R15DYP", "R15YRP", "R15DWP", "R15VPP", "R15PRESP", "R15CACTP", "R15SCISP",
+                  "R12MO","R12DY", "R12YR", "R12DW", "R12VP", "R12PRES", "R12CACT", "R12SCIS",
+                  "R11MO","R11DY", "R11YR", "R11DW", "R11VP", "R11PRES", "R11CACT", "R11SCIS",
+                  "R10MO","R10DY", "R10YR", "R10DW", "R10VP", "R10PRES", "R10CACT", "R10SCIS") 
+
+selected_sumscore <- COG_IMP_10to20 %>% 
+  dplyr::select(HHIDPN, all_of(naming_tests))  
+view(selected_sumscore)
+
+long_score <- selected_sumscore %>%
+  pivot_longer(
+    cols = -HHIDPN,
+    names_to = c("Wave", "Test"),
+    names_pattern = "(R1[0-5])([A-Z]+)",
+    values_to = "Score"
+  ) 
+view(long_score)
+
+yearly_sums <- long_score %>%
+  group_by(HHIDPN, Wave) %>%
+  summarise(
+    Total_Score = sum(Score, na.rm = TRUE),
+    Tests_Counted = n(),
+    .groups = 'drop'
+  ) %>%
+  arrange(HHIDPN, Wave)
+view(yearly_sums)
+
+# single out ones who have one 0 in orientation score
+zero_participants <- yearly_sums %>%
+  group_by(HHIDPN) %>%
+  filter(any(Total_Score == 0)) %>%
+  ungroup()
+view(zero_participants)
+
+# save ones who have complete oritentation scores across waves
+clean_yearly_sums <- yearly_sums %>%
+  group_by(HHIDPN) %>%
+  filter(all(Total_Score != 0)) %>%
+  ungroup()
+view(clean_yearly_sums)
+
+# calculate iSD
+individual_variability <- clean_yearly_sums %>%
+  group_by(HHIDPN) %>%
+  summarise(
+    n_waves = n(),
+    mean_score = mean(Total_Score, na.rm = TRUE),
+    iSD = sd(Total_Score, na.rm = TRUE),
+    score_range = max(Total_Score) - min(Total_Score),
+    .groups = 'drop'
+  ) 
+view(individual_variability)
+
+# identify HHIDPN
+zero_score_ids <- zero_participants %>%
+  distinct(HHIDPN) 
+count(zero_score_ids)
+
+zero_score_demographics <- COG_IMP_10to20 %>%
+  # Filter for only the zero-score IDs we saved earlier
+  filter(HHIDPN %in% zero_score_ids$HHIDPN) %>%
+  # Select only the demographic columns (plus ID)
+  dplyr::select(HHIDPN, RGROUP, GENDER, EDU, MAGE)
+
+table(zero_score_demographics$RGROUP)
+table(zero_score_demographics$GENDER)
+table(zero_score_demographics$EDU)
+table(zero_score_demographics$MAGE)
+```
+
+# Generating iSD
+```{r}
+# exclude missing cases from 2018 and 2020
+continuous_tests <- c("R13IMRC", "R13DLRC", "R13SER7", "R13SLFMEM",
+                      "R12IMRC", "R12DLRC", "R12SER7", "R12SLFMEM",
+                      "R11IMRC", "R11DLRC", "R11SER7", "R11SLFMEM",
+                      "R10IMRC", "R10DLRC", "R10SER7", "R10SLFMEM",
+                      "R14IMRCP", "R14DLRCP", "R14SER7P", "R14SLFMEM",
+                      "R15IMRCP", "R15DLRCP", "R15SER7P", "R15SLFMEM"
+                      ) 
+
+# Select predictors, HHIDPN and the continuous test columns
+COG_IMP_10to20_filtered <- COG_IMP_10to20 %>% dplyr::select(HHIDPN, GENDER, RGROUP, EDU, centered_10_AGE, all_of(continuous_tests))
+
+# rename those TEL-specified ones
+COG_IMP_10to20_filtered <- COG_IMP_10to20_filtered %>% rename(R14IMRC = R14IMRCP)
+COG_IMP_10to20_filtered <- COG_IMP_10to20_filtered %>% rename(R14DLRC = R14DLRCP)
+COG_IMP_10to20_filtered <- COG_IMP_10to20_filtered %>% rename(R14SER7 = R14SER7P)
+COG_IMP_10to20_filtered <- COG_IMP_10to20_filtered %>% rename(R15IMRC = R15IMRCP)
+COG_IMP_10to20_filtered <- COG_IMP_10to20_filtered %>% rename(R15DLRC = R15DLRCP)
+COG_IMP_10to20_filtered <- COG_IMP_10to20_filtered %>% rename(R15SER7 = R15SER7P)
+
+# Discover NA values
+colSums(is.na(COG_IMP_10to20_filtered))
+COG_IMP_10to20_filtered <- COG_IMP_10to20_filtered %>% drop_na(R14IMRC, R14DLRC,
+                                                               R14SER7, R15IMRC, 
+                                                               R15DLRC, R15SER7)
+str(COG_IMP_10to20_filtered)
+
+table(COG_IMP_10to20_filtered$GENDER)
+
+# Convert data from wide to long format separating Year and Test
+wide_data <- COG_IMP_10to20_filtered %>%
+  pivot_longer(
+    cols = matches("^R\\d{2}"),  # Select columns starting with R followed by 2 digits
+    names_pattern = "(^R\\d{2})(.*)",  # Split into (year)(test_name)
+    names_to = c("year", "test"),
+    values_to = "score"
+  ) %>%
+  pivot_wider(
+    names_from = "test",  # Spread test names back into columns
+    values_from = "score"
+  ) %>%
+  arrange(HHIDPN, desc(year))  # Sort by ID and year (R15 first, R10 last)
+
+long_data <- COG_IMP_10to20_filtered %>%
+  pivot_longer(
+    cols = matches("^R\\d{2}"),  # Selects all test columns (R10IMRC, R10DLRC, etc.)
+    names_pattern = "(^R\\d{2})(.*)",  # Splits into (year)(test)
+    names_to = c("year", "test"),
+    values_to = "score"
+  )
+
+iSD_results <- long_data %>%
+  group_by(HHIDPN, test) %>%
+  summarise(
+    iSD = sd(score, na.rm = TRUE),  # Intraindividual SD
+    n_obs = sum(!is.na(score)),     # Optional: Count non-missing years
+    across(c(GENDER, centered_10_AGE, RGROUP, EDU), first)  # Retain predictors
+  ) %>%
+  ungroup()
+
+iSD_wide <- iSD_results %>%
+  pivot_wider(
+    names_from = "test",
+    values_from = "iSD",
+    names_prefix = "iSD_"  # e.g., "iSD_IMRC", "iSD_DLRC"
+  ) %>%
+  dplyr::select(-n_obs)  
+
+write.csv(iSD_wide, file = "iSD_results.csv", row.names = FALSE)
+```
+
+# merge orientation iSD
+```{r}
+intersect_ids <- intersect(iSD_wide$HHIDPN, individual_variability$HHIDPN)
+length(intersect_ids) # who are matched 
+
+merged_iSD <- merge(iSD_wide, individual_variability[, c("HHIDPN", "iSD")],
+                     by = "HHIDPN", all = FALSE)  # INNER JOIN
+
+view(merged_iSD)
+write.csv(merged_iSD, file = "merged_iSD.csv", row.names = FALSE)
+```
+
+# regression
+```{r}
+table(merged_iSD$RGROUP)
+merged_iSD$RGROUP <- as.factor(merged_iSD$RGROUP)
+merged_iSD$RGROUP <- relevel(merged_iSD$RGROUP, ref = "Non-Hispanic White")
+
+continuous_tests <- c("iSD_DLRC", "iSD_IMRC", "iSD_SER7", 
+                      "iSD_SLFMEM") 
+predictors <- c("RGROUP", "EDU", "centered_10_AGE", "GENDER")
+
+estimates <- list()
+pvalues <- list()
+
+for (cog_var in continuous_tests) {
+  # Create formula (e.g., "iSD ~ RGROUP + EDU + centered_10_AGE + GENDER")
+  formula <- as.formula(paste(cog_var, "~", paste(predictors, collapse = " + ")))
+  
+  # Fit model and extract results
+  model <- lm(formula, data = merged_iSD)
+  coef_df <- tidy(model)
+  
+  # Store estimates and p-values
+  estimates[[cog_var]] <- coef_df$estimate
+  pvalues[[cog_var]] <- coef_df$p.value
+  
+  # Name the rows by predictor (for merging later)
+  names(estimates[[cog_var]]) <- coef_df$term
+  names(pvalues[[cog_var]]) <- coef_df$term
+}
+
+# Combine estimates and p-values into one data frame
+# 1. Convert lists to data frames
+estimates_df <- as.data.frame(do.call(cbind, estimates))
+pvalues_df <- as.data.frame(do.call(cbind, pvalues))
+colnames(estimates_df) <- paste0(colnames(estimates_df), "_Estimate")
+colnames(pvalues_df) <- paste0(colnames(pvalues_df), "_PValue")
+
+identical(rownames(estimates_df), rownames(pvalues_df))  # Should return TRUE
+
+# Get test names (without suffixes)
+test_names <- gsub("_Estimate$", "", colnames(estimates_df))
+
+# Initialize merged_df with the Predictor column
+merged_df <- data.frame(Predictor = rownames(estimates_df))
+
+# Add estimate and p-value columns in paired order
+for (test in test_names) {
+  merged_df[[paste0(test, "_Estimate")]] <- estimates_df[[paste0(test, "_Estimate")]]
+  merged_df[[paste0(test, "_PValue")]] <- pvalues_df[[paste0(test, "_PValue")]]
+}
+
+# Export to CSV
+write.csv(merged_df, "continuous_regression_results.csv", row.names = FALSE)
+```
+
+# regress orientation iSD
+```{r}
+continuous_tests <- c("iSD") 
+predictors <- c("RGROUP", "EDU", "centered_10_AGE", "GENDER")
+
+estimates <- list()
+pvalues <- list()
+
+for (cog_var in continuous_tests) {
+  # Create formula (e.g., "iSD ~ RGROUP + EDU + centered_10_AGE + GENDER")
+  formula <- as.formula(paste(cog_var, "~", paste(predictors, collapse = " + ")))
+  
+  # Fit model and extract results
+  model <- lm(formula, data = merged_iSD)
+  coef_df <- tidy(model)
+  
+  # Store estimates and p-values
+  estimates[[cog_var]] <- coef_df$estimate
+  pvalues[[cog_var]] <- coef_df$p.value
+  
+  # Name the rows by predictor (for merging later)
+  names(estimates[[cog_var]]) <- coef_df$term
+  names(pvalues[[cog_var]]) <- coef_df$term
+}
+
+# Combine estimates and p-values into one data frame
+# 1. Convert lists to data frames
+estimates_df <- as.data.frame(do.call(cbind, estimates))
+pvalues_df <- as.data.frame(do.call(cbind, pvalues))
+colnames(estimates_df) <- paste0(colnames(estimates_df), "_Estimate")
+colnames(pvalues_df) <- paste0(colnames(pvalues_df), "_PValue")
+
+identical(rownames(estimates_df), rownames(pvalues_df))  # Should return TRUE
+
+# Get test names (without suffixes)
+test_names <- gsub("_Estimate$", "", colnames(estimates_df))
+
+# Initialize merged_df with the Predictor column
+merged_df <- data.frame(Predictor = rownames(estimates_df))
+
+# Add estimate and p-value columns in paired order
+for (test in test_names) {
+  merged_df[[paste0(test, "_Estimate")]] <- estimates_df[[paste0(test, "_Estimate")]]
+  merged_df[[paste0(test, "_PValue")]] <- pvalues_df[[paste0(test, "_PValue")]]
+}
+
+write.csv(merged_df, "orientation_regression_results.csv", row.names = FALSE)
+```
+
+# visualization 
+```{r}
+ggplot(iiv_results, aes(x = iSD_DLRC)) +
+  geom_histogram(binwidth = 0.5, fill = "skyblue", color = "black") +
+  labs(
+    title = "Distribution of iSD for DLRC",
+    x = "Intraindividual SD (DLRC)",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+ggplot(iiv_results, aes(x = iSD_IMRC)) +
+  geom_histogram(binwidth = 0.5, fill = "skyblue", color = "black") +
+  labs(
+    title = "Distribution of iSD for IMRC",
+    x = "Intraindividual SD (IMRC)",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+ggplot(iiv_results, aes(x = iSD_SER7)) +
+  geom_histogram(binwidth = 0.5, fill = "skyblue", color = "black") +
+  labs(
+    title = "Distribution of iSD for SER7",
+    x = "Intraindividual SD (SER7)",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+ggplot(iiv_results, aes(x = iSD_SLFMEM)) +
+  geom_histogram(binwidth = 0.5, fill = "skyblue", color = "black") +
+  labs(
+    title = "Distribution of iSD for SLFMEM",
+    x = "Intraindividual SD (SLFMEM)",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+```
